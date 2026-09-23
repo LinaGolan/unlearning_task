@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.cache/
+.env
+.env.*
+data/
+outputs/
+dist/
+.ipynb_checkpoints/
+*.log
+
+# Original assignment handout is local reference material.
+Mechanistic Interpretability & Machine Unlearning - EX2.docx

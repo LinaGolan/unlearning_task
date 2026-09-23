@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "layer-unlearning"
+version = "0.1.0"
+description = "Reproducible layer-localization and activation-intervention experiments"
+requires-python = ">=3.8"
+dependencies = []
+
+[project.scripts]
+unlearning = "unlearning.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+

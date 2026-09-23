@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "retain_drop_limit_pp": 5,
+  "fallback_display_strength": 0.5,
+  "bootstrap_repetitions": 2000,
+  "bootstrap_seed": 20260919,
+  "confidence_level": 0.95,
+  "bootstrap_rule": "paired_question_ids_stratified_by_subject",
+  "tie_rule": "weaker_strength"
+}

@@ -1,0 +1,2 @@
+# Preserve exact bytes for source fingerprints and evidence SHA256 checks.
+* -text
