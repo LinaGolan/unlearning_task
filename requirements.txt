@@ -1,0 +1,19 @@
+# Python 3.13 stack and compatibility pins for earlier Python versions.
+# See results/run.json for the saved GPU run's actual Python/package versions.
+torch==2.11.0; python_version >= "3.13"
+transformers==5.16.1; python_version >= "3.13"
+tokenizers==0.23.1; python_version >= "3.13"
+huggingface-hub==1.29.0; python_version >= "3.13"
+accelerate==1.14.0; python_version >= "3.13"
+safetensors==0.8.0; python_version >= "3.13"
+pyarrow==23.0.1; python_version >= "3.13"
+
+torch>=2.4,<3; python_version < "3.13"
+transformers==4.46.3; python_version < "3.13"
+tokenizers==0.20.3; python_version < "3.13"
+huggingface-hub==0.33.4; python_version < "3.13"
+accelerate==1.6.0; python_version < "3.13"
+safetensors==0.5.3; python_version < "3.13"
+pyarrow==17.0.0; python_version < "3.13"
+
+matplotlib==3.10.8

@@ -1,4 +1,0 @@
--r requirements-colab.txt
-# Static research figures. Only install this file in Colab, not on the local PC.
-matplotlib==3.10.8; python_version >= "3.10"
-matplotlib==3.3.2; python_version < "3.10"

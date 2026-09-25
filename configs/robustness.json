@@ -1,9 +1,0 @@
-{
-  "schema_version": 1,
-  "alternative_instruction": "Select the best answer to the question. Respond with just A, B, C, or D.",
-  "prompt_subset_fraction": 0.5,
-  "sampling_rule": "sha256_within_role_and_subject",
-  "bootstrap_repetitions": 2000,
-  "bootstrap_seed": 20260919,
-  "confidence_level": 0.95
-}

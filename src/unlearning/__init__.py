@@ -1,3 +1,3 @@
-"""Reproducible data preparation and development-only baseline evaluation."""
+"""Layer localization and causal activation interventions for selective unlearning."""
 
-__version__ = "0.1.0"
+__version__ = "2.0.0"
