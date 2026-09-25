@@ -1,0 +1,201 @@
+{
+  "biology_size": 64,
+  "datasets": {
+    "biology": {
+      "repo": "cais/mmlu",
+      "revision": "c30699e8356da336a370243923dbaf21066bb9fe",
+      "subjects": {
+        "high_school_biology": "high school biology"
+      }
+    },
+    "forget": {
+      "repo": "cais/wmdp",
+      "revision": "7125571f22f032c56415e7980f48d877dd830ff8",
+      "subjects": {
+        "wmdp-bio": "biology"
+      }
+    },
+    "retain": {
+      "repo": "cais/mmlu",
+      "revision": "c30699e8356da336a370243923dbaf21066bb9fe",
+      "subjects": {
+        "high_school_computer_science": "high school computer science",
+        "high_school_geography": "high school geography",
+        "high_school_government_and_politics": "high school government and politics",
+        "high_school_microeconomics": "high school microeconomics",
+        "high_school_physics": "high school physics",
+        "high_school_psychology": "high school psychology",
+        "high_school_us_history": "high school US history",
+        "high_school_world_history": "high school world history"
+      }
+    }
+  },
+  "excluded_duplicate_questions": {
+    "biology": 1,
+    "forget": 0,
+    "retain": 18
+  },
+  "files": {
+    "biology/test.jsonl": {
+      "count": 64,
+      "sha256": "1f9427a3f852d36b923baf98bfd14eeb2a321cd2340969f94c1c36ee0f2c7ac9",
+      "subjects": {
+        "high_school_biology": 64
+      }
+    },
+    "forget/development.jsonl": {
+      "count": 128,
+      "sha256": "9cf9778ee6cbb8bc5ac19563066cb1137be4303c48d440e84da6373a6b3476c1",
+      "subjects": {
+        "wmdp-bio": 128
+      }
+    },
+    "forget/localization.jsonl": {
+      "count": 128,
+      "sha256": "a1e6b2380e1e464085cbb9950da54dbd18278ea9c082a252b112bf36632e2245",
+      "subjects": {
+        "wmdp-bio": 128
+      }
+    },
+    "forget/test.jsonl": {
+      "count": 256,
+      "sha256": "f6f2f5a5b90bc4f0187c5a55c14da5131e1eb45b44ae5ba4313c5e67dd050d50",
+      "subjects": {
+        "wmdp-bio": 256
+      }
+    },
+    "retain/development.jsonl": {
+      "count": 128,
+      "sha256": "3605c7bee9a1d621263d50aea04d765071ad8b62dc39ac2547d00f1b31f2db10",
+      "subjects": {
+        "high_school_computer_science": 16,
+        "high_school_geography": 16,
+        "high_school_government_and_politics": 16,
+        "high_school_microeconomics": 16,
+        "high_school_physics": 16,
+        "high_school_psychology": 16,
+        "high_school_us_history": 16,
+        "high_school_world_history": 16
+      }
+    },
+    "retain/localization.jsonl": {
+      "count": 128,
+      "sha256": "7c894658af37266a234afd5024911e8c9f692255dda7edc20cf1197b8da4b664",
+      "subjects": {
+        "high_school_computer_science": 16,
+        "high_school_geography": 16,
+        "high_school_government_and_politics": 16,
+        "high_school_microeconomics": 16,
+        "high_school_physics": 16,
+        "high_school_psychology": 16,
+        "high_school_us_history": 16,
+        "high_school_world_history": 16
+      }
+    },
+    "retain/test.jsonl": {
+      "count": 256,
+      "sha256": "4a1060b290a690fc8abc06934d5cb297ae0b0970ef7315a1930c1c5d79165d62",
+      "subjects": {
+        "high_school_computer_science": 32,
+        "high_school_geography": 32,
+        "high_school_government_and_politics": 32,
+        "high_school_microeconomics": 32,
+        "high_school_physics": 32,
+        "high_school_psychology": 32,
+        "high_school_us_history": 32,
+        "high_school_world_history": 32
+      }
+    }
+  },
+  "request_hash": "5d1eca32857f827969da0ca377e7d3dbb7206c8eaab71ed8e3eba921df13d77a",
+  "rule": "deduplicate by question text; per-subject SHA-256 rank cuts disjoint splits",
+  "schema_version": 2,
+  "seed": 20260919,
+  "sources": [
+    {
+      "file": "wmdp-bio/test-00000-of-00001.parquet",
+      "repo": "cais/wmdp",
+      "revision": "7125571f22f032c56415e7980f48d877dd830ff8",
+      "role": "forget",
+      "sha256": "738cee28e11e4dcf9a0efc6b2c22b425bddda4b2b69477a11f38539c86cf00b7",
+      "source_rows": 1273
+    },
+    {
+      "file": "high_school_us_history/test-00000-of-00001.parquet",
+      "repo": "cais/mmlu",
+      "revision": "c30699e8356da336a370243923dbaf21066bb9fe",
+      "role": "retain",
+      "sha256": "7e3c242fa3b087b918d30a5202948ed462363ca9de9e65a76970e2c58d5659b7",
+      "source_rows": 204
+    },
+    {
+      "file": "high_school_world_history/test-00000-of-00001.parquet",
+      "repo": "cais/mmlu",
+      "revision": "c30699e8356da336a370243923dbaf21066bb9fe",
+      "role": "retain",
+      "sha256": "abc9b0182e7cdd19ef7b70ec9734f62436f99e76c740c67f41155611eccbcd7d",
+      "source_rows": 237
+    },
+    {
+      "file": "high_school_geography/test-00000-of-00001.parquet",
+      "repo": "cais/mmlu",
+      "revision": "c30699e8356da336a370243923dbaf21066bb9fe",
+      "role": "retain",
+      "sha256": "d083f0a37e9802ff70af8c0ccee95dc6836d80db74f45327519756327076a2c1",
+      "source_rows": 198
+    },
+    {
+      "file": "high_school_government_and_politics/test-00000-of-00001.parquet",
+      "repo": "cais/mmlu",
+      "revision": "c30699e8356da336a370243923dbaf21066bb9fe",
+      "role": "retain",
+      "sha256": "54bb3fcc3987afc3ce0e605343752de94ca227bd4ae13c84b7b1ec9bc3998292",
+      "source_rows": 193
+    },
+    {
+      "file": "high_school_microeconomics/test-00000-of-00001.parquet",
+      "repo": "cais/mmlu",
+      "revision": "c30699e8356da336a370243923dbaf21066bb9fe",
+      "role": "retain",
+      "sha256": "8a55dc2fa10fa86cc4cf5565bb49416bdcf45b545ebb83f6ce8e4360cc65b453",
+      "source_rows": 238
+    },
+    {
+      "file": "high_school_psychology/test-00000-of-00001.parquet",
+      "repo": "cais/mmlu",
+      "revision": "c30699e8356da336a370243923dbaf21066bb9fe",
+      "role": "retain",
+      "sha256": "9df4a744eb6faa12bb359df1f808c0461c055f240b998a9ec9d97b1c4e49a958",
+      "source_rows": 545
+    },
+    {
+      "file": "high_school_physics/test-00000-of-00001.parquet",
+      "repo": "cais/mmlu",
+      "revision": "c30699e8356da336a370243923dbaf21066bb9fe",
+      "role": "retain",
+      "sha256": "48fc84060e4cd032a407da09164e99dfdf81f3ce345bf6c1871bb539ba4ead6c",
+      "source_rows": 151
+    },
+    {
+      "file": "high_school_computer_science/test-00000-of-00001.parquet",
+      "repo": "cais/mmlu",
+      "revision": "c30699e8356da336a370243923dbaf21066bb9fe",
+      "role": "retain",
+      "sha256": "6e1b210896afc60f2ea3a1b011733b86dedd74690adce6ff0893346089f83252",
+      "source_rows": 100
+    },
+    {
+      "file": "high_school_biology/test-00000-of-00001.parquet",
+      "repo": "cais/mmlu",
+      "revision": "c30699e8356da336a370243923dbaf21066bb9fe",
+      "role": "biology",
+      "sha256": "73600cc5c8032ffd20115887ec4f2c868d75c403c70ac1d115295e72cb8d80e3",
+      "source_rows": 310
+    }
+  ],
+  "splits": {
+    "development": 128,
+    "localization": 128,
+    "test": 256
+  }
+}
