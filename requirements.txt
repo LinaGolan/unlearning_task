@@ -1,5 +1,6 @@
-# Python 3.13 stack and compatibility pins for earlier Python versions.
-# See results/run.json for the saved GPU run's actual Python/package versions.
+# Installation stacks selected by Python version. Historical run environments
+# are recorded in results/run.json and results/setup.json; these pins do not
+# reconstruct every detail of the original environment.
 torch==2.11.0; python_version >= "3.13"
 transformers==5.16.1; python_version >= "3.13"
 tokenizers==0.23.1; python_version >= "3.13"

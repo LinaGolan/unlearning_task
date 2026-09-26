@@ -16,10 +16,8 @@ from .experiment import METHODS, condition_name
 ROLES = ("forget", "retain")
 LABELS_FOR = {"top_localized": "Top-k localization", "top_selective": "WMDP-vs-Retain",
               "bottom_localized": "Bottom-k", "random_mean": "Random (mean of 5)"}
-# The symbol each score is written as in the report; not derivable from the key name
-# (separability is A, not S, which S already denotes for the gradient selectivity score).
-SYMBOLS = {"forget": "F", "selective": "S", "contribution": "C", "separability": "A",
-           "retain": "R"}
+# Symbols used for the localization scores in the report.
+SYMBOLS = {"forget": "F", "selective": "S", "retain": "R"}
 
 
 def load_predictions(out_dir, name):
@@ -131,7 +129,9 @@ def analyse(out_dir, only=None):
     for method in methods:
         scores = localization[method]["scores"]
         analysis["localization"][method] = {
-            "scores": scores, "split_half_spearman": localization[method]["split_half_spearman"]}
+            "scores": scores,
+            "standard_errors": localization[method].get("standard_errors", {}),
+            "selection": localization[method].get("selection", {})}
 
     baseline = load_predictions(out_dir, "test__baseline")
     analysis["baseline"] = {role: accuracy([r for r in baseline if r["role"] == role]) for role in ROLES}
@@ -213,48 +213,6 @@ def analyse(out_dir, only=None):
         prompts[style] = entry
     analysis["controls"]["prompts"] = prompts
 
-    cross = {}
-    for target in methods:
-        for kind_method in methods:
-            kind = METHODS[kind_method]["intervention"]
-            alpha = run["operating_point"][kind_method]["alpha"]
-            records = load_predictions(out_dir, "cross__target{}__{}__a{:g}".format(target, kind, alpha))
-            if records is None:
-                continue
-            entry = {"units": _units(run["selections"][target]["top_selective"]), "alpha": alpha}
-            for role in ROLES:
-                summary = accuracy([r for r in records if r["role"] == role])
-                entry[role] = dict(summary, drop_pp=100 * (analysis["baseline"][role]["accuracy"]
-                                                          - summary["accuracy"]))
-            cross["layers={} / intervention={}".format(target, kind)] = entry
-    analysis["controls"]["cross"] = cross
-
-    # Does the first-order score predict the effect on the quantity it differentiates?
-    # predicted drop in mean correct-answer log probability = alpha * score at the ablated layer.
-    gate_scores = localization["gate"]["scores"]
-    first_order = []
-    for selection in list(LABELS_FOR)[:3]:
-        layers = run["selections"]["gate"].get(selection)
-        if not layers:
-            continue
-        layer = layers[0]
-        for alpha in run["strengths"]:
-            if alpha == 0:
-                continue
-            records = load_predictions(out_dir, "test__" + condition_name("gate", selection, alpha))
-            if records is None:
-                continue
-            for role, key in (("forget", "forget"), ("retain", "retain")):
-                reference = accuracy([r for r in baseline if r["role"] == role])
-                actual = accuracy([r for r in records if r["role"] == role])
-                first_order.append({
-                    "selection": selection, "layer": layer, "alpha": alpha, "role": role,
-                    "predicted_log_probability_drop": alpha * gate_scores[key][layer],
-                    "actual_log_probability_drop": reference["mean_correct_log_probability"]
-                                                   - actual["mean_correct_log_probability"],
-                    "actual_accuracy_drop_pp": 100 * (reference["accuracy"] - actual["accuracy"])})
-    analysis["controls"]["first_order_check"] = first_order
-
     letters = {}
     for method in methods:
         alpha = run["operating_point"][method]["alpha"]
@@ -263,6 +221,37 @@ def analyse(out_dir, only=None):
             letters[method] = accuracy([r for r in records if r["role"] == "forget"])["predicted_letters"]
     letters["baseline"] = accuracy([r for r in baseline if r["role"] == "forget"])["predicted_letters"]
     analysis["controls"]["answer_letters"] = letters
+
+    # Reproduce the single-layer diagnostic in the report's Appendix A.
+    # The gradient is with respect to g, while the intervention sets g = 1 - alpha;
+    # a positive alpha * score therefore predicts a drop in correct-answer log p.
+    first_order = []
+    if "gate" in methods:
+        for selection in ("top_localized", "bottom_localized"):
+            selected = run["selections"]["gate"][selection]
+            if len(selected) != 1:
+                continue
+            layer = selected[0]
+            for alpha in run["strengths"]:
+                if alpha == 0:
+                    continue
+                records = load_predictions(
+                    out_dir, "test__" + condition_name("gate", selection, alpha))
+                if records is None:
+                    continue
+                for role in ROLES:
+                    measured = accuracy([r for r in records if r["role"] == role])
+                    base = analysis["baseline"][role]
+                    first_order.append({
+                        "selection": selection, "layer": layer, "alpha": alpha, "role": role,
+                        "predicted_log_probability_drop":
+                            alpha * localization["gate"]["scores"][role][layer],
+                        "actual_log_probability_drop":
+                            base["mean_correct_log_probability"] - measured["mean_correct_log_probability"],
+                        "actual_accuracy_drop_pp": 100 * (base["accuracy"] - measured["accuracy"]),
+                    })
+    if first_order:
+        analysis["controls"]["first_order_check"] = first_order
 
     write_json(out_dir / "analysis.json", analysis)
     return analysis
@@ -294,6 +283,8 @@ def tables(analysis, out_dir):
 
 
 def figures(analysis, figure_dir):
+    """Three figures. Every panel carries exactly one y-axis: scores that live on
+    different scales get their own panel rather than a shared twin axis."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -306,36 +297,38 @@ def figures(analysis, figure_dir):
     markers = dict(zip(methods, ["o", "s", "^", "D", "v", "P"]))
     made = []
 
-    # 1: per-layer localization scores, one panel per method.
-    fig, axes = plt.subplots(1, len(methods), figsize=(4.4 * len(methods), 3.7), squeeze=False)
-    for axis, method in zip(axes[0], methods):
+    # 1: per-layer localization scores. One row per method, one column per score,
+    #    so no panel mixes two scales.
+    fig, axes = plt.subplots(len(methods), 2, figsize=(9.6, 3.3 * len(methods)), squeeze=False)
+    for row, method in enumerate(methods):
         spec = METHODS[method]
         scores = analysis["localization"][method]["scores"]
-        localized = scores[spec["localized"]]
-        selective = scores[spec["selective"]]
-        layers = range(len(localized))
-        axis.axhline(0, color="#94a3b8", lw=.8)
-        axis.plot(list(layers), localized, "o-", color="#b45309",
-                  label="WMDP-only  $%s_\\ell$" % SYMBOLS[spec["localized"]])
-        twin = axis.twinx()
-        twin.plot(list(layers), selective, "s--", color="#6d28d9",
-                  label="forget-vs-retain  $%s_\\ell$" % SYMBOLS[spec["selective"]])
-        twin.set_ylabel("forget-vs-retain", color="#6d28d9", fontsize=8)
-        axis.set_ylabel("WMDP-only", color="#b45309", fontsize=8)
-        axis.set_title(method, fontsize=10)
-        axis.set_xlabel("decoder layer")
-        axis.set_xticks(list(layers)[::2] if len(localized) > 8 else list(layers))
-        axis.grid(alpha=.25)
-        handles = axis.get_legend_handles_labels()[0] + twin.get_legend_handles_labels()[0]
-        axis.legend(handles, [h.get_label() for h in handles], fontsize=6.5,
-                    loc="lower left", framealpha=.9)
+        for column, (key, colour) in enumerate(((spec["localized"], "#b45309"),
+                                               (spec["selective"], "#6d28d9"))):
+            axis = axes[row][column]
+            values = scores[key]
+            layers = list(range(len(values)))
+            axis.axhline(0, color="#94a3b8", lw=.8)
+            axis.bar(layers, values, color=colour, width=.68)
+            best = max(layers, key=lambda i: values[i])
+            axis.annotate("layer {}".format(best), (best, values[best]), fontsize=7,
+                          color=colour, ha="center",
+                          va="bottom" if values[best] >= 0 else "top",
+                          xytext=(0, 4 if values[best] >= 0 else -10), textcoords="offset points")
+            axis.margins(y=.18)          # headroom so the annotation is not clipped
+            axis.set_xticks(layers[::2])
+            axis.set_xlabel("decoder layer")
+            axis.set_ylabel("${}_\\ell$".format(SYMBOLS[key]))
+            axis.set_title("{} — {}".format(method, "WMDP-only" if column == 0 else "forget-vs-retain"),
+                           fontsize=9.5)
+            axis.grid(alpha=.25, axis="y")
     fig.tight_layout()
     fig.savefig(figure_dir / "localization.png", dpi=170)
     plt.close(fig)
     made.append("localization.png")
 
-    # 2: strength curves, one panel per method.
-    fig, axes = plt.subplots(1, len(methods), figsize=(4.0 * len(methods), 3.8),
+    # 2: strength curves. Single y-axis per panel (accuracy, %), line style separates the sets.
+    fig, axes = plt.subplots(1, len(methods), figsize=(4.6 * len(methods), 3.9),
                              sharey=True, squeeze=False)
     for axis, method in zip(axes[0], methods):
         curve = analysis["sweep"][method]
@@ -356,13 +349,13 @@ def figures(analysis, figure_dir):
     keys = [Line2D([], [], color="#334155", ls="-"), Line2D([], [], color="#334155", ls="--")]
     fig.legend(handles + keys, labels + ["WMDP (solid)", "retain (dashed)"],
                loc="lower center", ncol=3, fontsize=7.5, frameon=False)
-    fig.tight_layout(rect=(0, 0.17, 1, 1))
+    fig.tight_layout(rect=(0, 0.18, 1, 1))
     fig.savefig(figure_dir / "strength.png", dpi=170)
     plt.close(fig)
     made.append("strength.png")
 
-    # 3: forgetting-retention tradeoff across every tested strength.
-    fig, axis = plt.subplots(figsize=(6.4, 4.8))
+    # 3: forgetting against retention. One pair of axes, both in percentage points.
+    fig, axis = plt.subplots(figsize=(6.0, 4.6))
     base = analysis["baseline"]
     for method in methods:
         for name, colour in colours.items():
@@ -373,21 +366,21 @@ def figures(analysis, figure_dir):
                     continue
                 xs.append(100 * (base["retain"]["accuracy"] - row["retain"]))
                 ys.append(100 * (base["forget"]["accuracy"] - row["forget"]))
-            axis.plot(xs, ys, markers[method], color=colour, ms=5, alpha=.85,
+            axis.plot(xs, ys, markers[method], color=colour, ms=5.5, alpha=.85,
                       label="{} / {}".format(method, LABELS_FOR[name]))
     limit = max(axis.get_xlim()[1], axis.get_ylim()[1])
     axis.plot([0, limit], [0, limit], color="#94a3b8", ls=":", lw=.9, label="_nolegend_")
-    axis.annotate("equal damage", (limit * .72, limit * .72), fontsize=6.5, color="#64748b",
+    axis.annotate("equal damage", (limit * .70, limit * .70), fontsize=6.5, color="#64748b",
                   rotation=38, ha="center", va="bottom")
-    axis.annotate("better: more forgetting\nper unit of retain damage", (limit * .06, limit * .93),
+    axis.annotate("better: more forgetting\nper unit of retain damage", (limit * .04, limit * .95),
                   fontsize=6.5, color="#64748b", va="top")
     axis.set_xlabel("retain accuracy drop (pp)")
     axis.set_ylabel("WMDP accuracy drop (pp)")
     axis.set_title("Forgetting vs retention (every tested strength)", fontsize=10)
     axis.grid(alpha=.25)
     handles, labels = axis.get_legend_handles_labels()
-    fig.legend(handles, labels, loc="lower center", ncol=4, fontsize=6, frameon=False)
-    fig.tight_layout(rect=(0, 0.18, 1, 1))
+    fig.legend(handles, labels, loc="lower center", ncol=2, fontsize=6.5, frameon=False)
+    fig.tight_layout(rect=(0, 0.20, 1, 1))
     fig.savefig(figure_dir / "tradeoff.png", dpi=170)
     plt.close(fig)
     made.append("tradeoff.png")
@@ -424,12 +417,23 @@ def markdown(analysis, out_dir):
     for layer in range(len(columns[0])):
         lines.append("| {} | ".format(layer) + " | ".join("{:+.4f}".format(c[layer]) for c in columns) + " |")
     lines += [""]
-    for m in methods:
-        stability = analysis["localization"][m]["split_half_spearman"]
-        if stability:
-            lines.append("Split-half Spearman, {}: ".format(m) + ", ".join(
-                "{} {:+.2f}".format(k, v) for k, v in stability.items()))
-    lines += [""]
+    # Whether the argmax is meaningful at all: how far the best layer is from the runner-up,
+    # measured in standard errors of that gap.
+    if any(analysis["localization"][m].get("selection") for m in methods):
+        lines += ["", "Is the selected layer separable from the runner-up?", "",
+                  "| Method | Score | Best layer | Runner-up | Gap | Gap in standard errors "
+                  "| Layers within 1 s.e. | Layer chosen by each half | Questions needed for a 2 s.e. gap |",
+                  "| --- | --- | :---: | :---: | ---: | ---: | --- | :---: | ---: |"]
+        for m in methods:
+            for key, entry in (analysis["localization"][m].get("selection") or {}).items():
+                halves = entry.get("layer_chosen_by_each_half")
+                lines.append("| {} | ${}_\\ell$ | {} | {} | {:+.4f} | **{:.2f}** | {} | {} | {} |".format(
+                    m, SYMBOLS[key], entry["best_layer"], entry["runner_up"], entry["gap"],
+                    entry["gap_in_standard_errors"],
+                    ", ".join(map(str, entry["layers_within_one_standard_error"])),
+                    "{} vs {}".format(*halves) if halves else "-",
+                    entry.get("questions_for_two_standard_errors") or "-"))
+        lines += [""]
 
     for method in methods:
         block = analysis["main"][method]
@@ -525,20 +529,6 @@ def markdown(analysis, out_dir):
                         style, "WMDP" if role == "forget" else "retain",
                         _pct(entry["baseline"][role]["accuracy"]), _pct(entry[method][role]["accuracy"]),
                         _ci(entry[method][role]), method))
-        lines.append("")
-
-    cross = analysis["controls"]["cross"]
-    if cross:
-        lines += ["## Which change mattered: target layer x intervention type", "",
-                  "| Layer chosen by | Intervention | Layer | alpha | WMDP % | Delta WMDP pp "
-                  "| Retain % | Delta Retain pp |",
-                  "| --- | --- | :---: | :---: | ---: | ---: | ---: | ---: |"]
-        for name, entry in cross.items():
-            target, kind = [part.split("=")[1] for part in name.split(" / ")]
-            lines.append("| {} | {} | {} | {:g} | {} | {:+.2f} | {} | {:+.2f} |".format(
-                target, kind, entry.get("units", "-"), entry["alpha"],
-                _pct(entry["forget"]["accuracy"]), entry["forget"]["drop_pp"],
-                _pct(entry["retain"]["accuracy"]), entry["retain"]["drop_pp"]))
         lines.append("")
 
     check = analysis["controls"].get("first_order_check") or []

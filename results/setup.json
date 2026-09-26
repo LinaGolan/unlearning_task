@@ -45,8 +45,7 @@
       "k": 1,
       "methods": [
         "gate",
-        "gate_margin",
-        "direction"
+        "gate_margin"
       ],
       "random_seeds": [
         101,

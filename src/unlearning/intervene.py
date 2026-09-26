@@ -1,15 +1,18 @@
-"""Two reversible activation interventions on selected decoder layers.
+"""A reversible activation intervention on selected decoder layers.
 
-Both are forward hooks on whole decoder blocks, so model weights never change and
+It is a forward hook on whole decoder blocks, so model weights never change and
 removing the hook restores the original model exactly. Layer indices are 0-based.
 
-block_scale      h' = h_in + (1 - a) * (h_out - h_in)      (whole decoder block)
-direction_ablate h' = h_out - a * ((h_out . u) - m) * u      (one residual direction)
+The intervention scales a whole decoder block's residual contribution:
+
+    h' = h_in + (1 - a) * (h_out - h_in)
+
+so a = 0 is the unmodified model and a = 1 skips the block entirely.
 """
 
 import torch
 
-METHODS = ("block_scale", "direction_ablate")
+METHODS = ("block_scale",)
 
 
 def decoder_layers(model):
@@ -32,16 +35,13 @@ class Intervention:
     `gates`, used only for differentiating the localization score, replaces alpha
     with one differentiable scale per layer: h' = h_out + (g - 1) * (h_out - h_in),
     which is exactly the identity at g = 1 while keeping a usable derivative.
-    `directions` maps a layer index to (unit_direction, retain_mean_projection)
-    and is required by direction_ablate.
     """
 
-    def __init__(self, model, method="block_scale", layers=(), alpha=0.0,
-                 directions=None, gates=None):
+    def __init__(self, model, method="block_scale", layers=(), alpha=0.0, gates=None):
         self.model, self.method = model, method
         self.blocks = decoder_layers(model)
         self.layers = tuple(layers)
-        self.alpha, self.directions, self.gates = float(alpha), directions or {}, gates
+        self.alpha, self.gates = float(alpha), gates
         self.handles = []
         if method not in METHODS:
             raise ValueError("Unknown intervention method: " + str(method))
@@ -57,8 +57,6 @@ class Intervention:
             if gates.shape != (len(self.blocks),):
                 raise ValueError("Supply one gate per decoder layer.")
             self.layers = tuple(range(len(self.blocks)))
-        if method == "direction_ablate" and any(i not in self.directions for i in self.layers):
-            raise ValueError("direction_ablate needs a direction for every selected layer.")
 
     def _hook(self, index):
         def apply(module, args, kwargs, output):
@@ -70,13 +68,8 @@ class Intervention:
                 changed = h_out + (self.gates[index] - 1) * (h_out - h_in)
             elif self.alpha == 0.0:
                 return output
-            elif self.method == "block_scale":
-                changed = h_in if self.alpha == 1.0 else h_out - self.alpha * (h_out - h_in)
             else:
-                unit, mean = self.directions[index]
-                unit = unit.to(h_out.dtype).to(h_out.device)
-                projection = (h_out * unit).sum(-1, keepdim=True) - mean
-                changed = h_out - self.alpha * projection * unit
+                changed = h_in if self.alpha == 1.0 else h_out - self.alpha * (h_out - h_in)
             return (changed,) + output[1:] if isinstance(output, tuple) else changed
         return apply
 

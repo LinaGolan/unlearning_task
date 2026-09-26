@@ -1,6 +1,0 @@
-method,layers,alpha,wmdp_accuracy,delta_wmdp_pp,retain_accuracy,delta_retain_pp
-Baseline,-,0,60.55,0.00,53.91,0.00
-Top-k localization,0|1|2|15,1,56.25,4.30,55.08,-1.17
-WMDP-vs-Retain,1|2|3|4,1,55.08,5.47,55.86,-1.95
-Bottom-k,11|12|13|14,1,58.59,1.95,53.52,0.39
-Random (mean of 5),varies,1,56.80,3.75,54.30,-0.39

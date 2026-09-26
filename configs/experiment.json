@@ -65,8 +65,7 @@
     ],
     "methods": [
       "gate",
-      "gate_margin",
-      "direction"
+      "gate_margin"
     ]
   },
   "batch_size": 8,

@@ -5,9 +5,9 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "layer-unlearning"
 version = "2.0.0"
-authors = [{name = "LinaGolan"}]
 description = "Layer localization and causal activation interventions for selective unlearning"
-requires-python = ">=3.9"
+authors = [{name = "LinaGolan"}]
+requires-python = ">=3.10"
 dependencies = ["torch>=2.4,<3", "transformers>=4.46", "pyarrow>=17", "matplotlib>=3.7"]
 
 [tool.setuptools.packages.find]

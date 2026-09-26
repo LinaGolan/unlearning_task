@@ -19,7 +19,7 @@ def main(argv=None):
     parser.add_argument("--strengths", default=None,
                         help="override the strength grid, e.g. 0,0.5,1.0")
     parser.add_argument("--methods", default=None,
-                        help="comma-separated subset of gate,gate_margin,direction")
+                        help="comma-separated subset of gate,gate_margin")
     args = parser.parse_args(argv)
 
     from .data import read_config

@@ -16,18 +16,15 @@ from . import data as datamod
 from .data import digest, load_split, read_config, write_json
 from .evaluate import LABELS, Evaluator, accuracy, label_token_ids, render
 from .intervene import Intervention, decoder_layers, gate_gradient
-from .localize import activation_scores, gradient_scores, random_layers, select
+from .localize import gradient_scores, random_layers, select
 
-# Each method pairs a localization score with the intervention it naturally implies.
+# The two localization variants differ only in the objective their gradient is taken of.
 # localized/selective name the WMDP-only and forget-vs-retain score keys.
 METHODS = {
-    "gate": {"intervention": "block_scale", "unit": "layer",
-             "localized": "forget", "selective": "selective"},
-    "gate_margin": {"intervention": "block_scale", "unit": "layer",
-                    "localized": "forget", "selective": "selective"},
-    "direction": {"intervention": "direction_ablate", "unit": "layer",
-                  "localized": "contribution", "selective": "separability"},
+    "gate": {"objective": "logprob", "localized": "forget", "selective": "selective"},
+    "gate_margin": {"objective": "margin", "localized": "forget", "selective": "selective"},
 }
+INTERVENTION = "block_scale"
 
 
 def log(message):
@@ -72,20 +69,17 @@ def environment(model):
 
 
 def mechanism_checks(evaluator, examples):
-    """Prove the interventions are identity at alpha=0, reversible, and differentiated correctly."""
+    """Prove the intervention is the identity at alpha=0, reversible, and differentiated correctly."""
     model = evaluator.model
     sample = examples[:4]
     base = evaluator.score(sample)
     checks = {}
     before = len(list(model.modules())), sum(len(b._forward_hooks) for b in decoder_layers(model))
     with Intervention(model, "block_scale", layers=(0, 1), alpha=0.0):
-        checks["block_scale_alpha0_identity"] = evaluator.score(sample) == base
+        checks["alpha0_is_exactly_the_unmodified_model"] = evaluator.score(sample) == base
     with Intervention(model, "block_scale", layers=(0,), alpha=1.0):
         suppressed = evaluator.score(sample)
-    checks["block_scale_alpha1_changes_scores"] = suppressed != base
-    directions = {0: (torch.zeros(model.config.hidden_size), 0.0)}
-    with Intervention(model, "direction_ablate", layers=(0,), alpha=0.0, directions=directions):
-        checks["direction_alpha0_identity"] = evaluator.score(sample) == base
+    checks["alpha1_changes_scores"] = suppressed != base
     checks["hooks_removed"] = (len(list(model.modules())),
                                sum(len(b._forward_hooks) for b in decoder_layers(model))) == before
     checks["weights_frozen"] = not any(p.requires_grad for p in model.parameters())
@@ -93,21 +87,29 @@ def mechanism_checks(evaluator, examples):
     # Central finite differences on three layers confirm the analytic gate gradient.
     layers = len(decoder_layers(model))
     probes, step = [], 0.01
-    for example in sample[:2]:
-        _, analytic = gate_gradient(evaluator, example)
-        inputs, last = evaluator._batch([example])
-        for layer in (0, layers // 2, layers - 1):
-            values = []
-            for delta in (step, -step):
-                gates = torch.ones(layers, device=evaluator.device,
-                                   dtype=next(model.parameters()).dtype)
-                gates[layer] += delta
-                with Intervention(model, gates=gates), torch.inference_mode():
-                    logits = evaluator._forward(inputs, last)
-                values.append(float(torch.log_softmax(logits[0, evaluator.label_ids], -1)[example["answer"]]))
-            numeric = (values[0] - values[1]) / (2 * step)
-            probes.append({"id": example["id"], "layer": layer, "analytic": analytic[layer],
-                           "finite_difference": numeric, "absolute_error": abs(numeric - analytic[layer])})
+    for objective in ("logprob", "margin"):
+        for example in sample[:2]:
+            _, analytic = gate_gradient(evaluator, example, objective)
+            inputs, last = evaluator._batch([example])
+            for layer in (0, layers // 2, layers - 1):
+                values = []
+                for delta in (step, -step):
+                    gates = torch.ones(layers, device=evaluator.device,
+                                       dtype=next(model.parameters()).dtype)
+                    gates[layer] += delta
+                    with Intervention(model, gates=gates), torch.inference_mode():
+                        logits = evaluator._forward(inputs, last)
+                    answers = logits[0, evaluator.label_ids]
+                    target = example["answer"]
+                    if objective == "margin":
+                        rivals = torch.cat([answers[:target], answers[target + 1:]])
+                        values.append(float(answers[target] - rivals.max()))
+                    else:
+                        values.append(float(torch.log_softmax(answers, -1)[target]))
+                numeric = (values[0] - values[1]) / (2 * step)
+                probes.append({"objective": objective, "id": example["id"], "layer": layer,
+                               "analytic": analytic[layer], "finite_difference": numeric,
+                               "absolute_error": abs(numeric - analytic[layer])})
     checks["gate_gradient_matches_finite_difference"] = max(p["absolute_error"] for p in probes) < 5e-3
     if not all(v for k, v in checks.items()):
         raise RuntimeError("Mechanism checks failed: " + json.dumps(checks))
@@ -145,11 +147,6 @@ def evaluate_condition(evaluator, examples, out_dir, name, kind=None, alpha=0.0,
     return records
 
 
-def tensor_directions(saved, device):
-    return {int(layer): (torch.tensor(info["unit"], device=device), info["retain_mean_projection"])
-            for layer, info in saved.items()}
-
-
 def selections_for(method, scores, config, universe):
     """The four task conditions: top localized, top selective, bottom localized, random."""
     spec = METHODS[method]
@@ -160,13 +157,6 @@ def selections_for(method, scores, config, universe):
     for seed in config["intervention"]["random_seeds"]:
         chosen["random_{}".format(seed)] = random_layers(universe, budget, seed)
     return chosen
-
-
-def intervention_kwargs(method, chosen, directions):
-    """Translate a selection into the keyword arguments Intervention expects."""
-    if METHODS[method]["intervention"] == "direction_ablate":
-        return {"layers": chosen, "directions": directions}
-    return {"layers": chosen}
 
 
 def drop_table(baseline, records_by_condition):
@@ -238,36 +228,57 @@ def run(config_path, data_dir, out_dir, cache_dir, device=None, k=None, strength
     write_json(out_dir / "setup.json", setup)
     log("gate gradient max finite-difference error {:.2e}".format(setup["mechanism"]["max_absolute_gradient_error"]))
 
+    # Cached prediction filenames encode the method, selection and strength but not the layer
+    # budget, so reusing a directory built with a different k (or model, data, prompt or seed)
+    # would silently mix incompatible conditions. Refuse instead.
+    context = {"model": config["model"], "datasets": config["datasets"], "splits": config["splits"],
+               "seed": config["seed"], "prompt": config["prompt"], "k": config["intervention"]["k"]}
+    context_path = out_dir / "context.json"
+    if context_path.exists():
+        previous = json.loads(context_path.read_text(encoding="utf-8"))
+        differing = [key for key in context if previous.get(key) != context[key]]
+        if differing:
+            raise ValueError(
+                "{} holds results produced with a different {}. Cached predictions do not record "
+                "the layer budget, so reusing this directory would mix incompatible conditions: "
+                "choose a fresh --out directory.".format(out_dir, ", ".join(sorted(differing))))
+    write_json(context_path, context)
+
+    # Localization is cached so a resumed run does not recompute it. The cache may predate
+    # the current method set (or a --methods change), so anything missing is computed and
+    # merged rather than assumed present.
     path = out_dir / "localization.json"
-    if path.exists():
-        localization_result = json.loads(path.read_text(encoding="utf-8"))
-        directions_saved = json.loads((out_dir / "directions.json").read_text(encoding="utf-8"))
-    else:
-        localization_result = {"questions": {role: sum(e["role"] == role for e in localization)
-                                            for role in ("forget", "retain")}}
-        directions_saved = {}
-        for method in active:
-            if method in ("gate", "gate_margin"):
-                objective = "margin" if method == "gate_margin" else "logprob"
-                log("localization: gradient attribution ({}) over {} questions".format(
-                    objective, len(localization)))
-                scores, detail = gradient_scores(evaluator, localization, config["seed"], log, objective)
-                localization_result["per_question_gradients_" + objective] = detail["per_question"]
-            else:
-                log("localization: activation statistics")
-                scores, detail = activation_scores(evaluator, localization, config["seed"])
-                directions_saved = detail.pop("directions")
-            localization_result[method] = {
-                "scores": scores, "split_half_spearman": detail.get("split_half_spearman", {}),
-                "split_half_scores": detail.get("split_half_scores", [])}
+    fingerprint = digest([config["model"], config["datasets"], config["splits"], config["seed"],
+                          [e["id"] for e in localization]])
+    localization_result = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    if localization_result.get("fingerprint", fingerprint) != fingerprint:
+        raise ValueError(
+            "{} was produced from a different model, dataset, seed or split than this run. "
+            "Reusing it would mix incompatible results: choose a fresh --out directory."
+            .format(path))
+    localization_result["fingerprint"] = fingerprint
+    localization_result.setdefault("questions", {role: sum(e["role"] == role for e in localization)
+                                                for role in ("forget", "retain")})
+    missing = [m for m in active if m not in localization_result]
+    for method in missing:
+        objective = METHODS[method]["objective"]
+        log("localization: gradient attribution ({}) over {} questions".format(
+            objective, len(localization)))
+        scores, detail = gradient_scores(evaluator, localization, config["seed"], log, objective)
+        localization_result["per_question_gradients_" + objective] = detail["per_question"]
+        localization_result[method] = {"scores": scores,
+                                      "standard_errors": detail["standard_errors"],
+                                      "selection": detail["selection"],
+                                      "questions": detail["questions"]}
+    if missing:
         write_json(path, localization_result)
-        write_json(out_dir / "directions.json", directions_saved)
-    directions = tensor_directions(directions_saved, evaluator.device)
+    else:
+        log("localization: reusing cached scores for " + ", ".join(active))
+    absent = [m for m in active if m not in localization_result]
+    if absent:
+        raise RuntimeError("Localization scores missing after computation: " + ", ".join(absent))
 
     selections = {method: selections_for(method, localization_result[method]["scores"], config, layers)
-                  for method in active}
-    kwargs_for = {method: {name: intervention_kwargs(method, chosen, directions)
-                           for name, chosen in selections[method].items()}
                   for method in active}
     log("selected layers: " + json.dumps({m: {k: list(v) for k, v in sel.items()}
                                           for m, sel in selections.items()}))
@@ -280,7 +291,6 @@ def run(config_path, data_dir, out_dir, cache_dir, device=None, k=None, strength
         baselines[split] = evaluate_condition(evaluator, questions, out_dir, split + "__baseline")
         sweeps[split] = {}
         for method in active:
-            kind = METHODS[method]["intervention"]
             # Development only needs the condition the strength rule reads; the full
             # grid of conditions is reserved for the held-out test split.
             wanted = ["top_selective"] if split == "development" else list(selections[method])
@@ -290,8 +300,9 @@ def run(config_path, data_dir, out_dir, cache_dir, device=None, k=None, strength
                         sweeps[split][(method, selection, alpha)] = baselines[split]
                         continue
                     name = split + "__" + condition_name(method, selection, alpha)
-                    records = evaluate_condition(evaluator, questions, out_dir, name, kind,
-                                                 alpha, **kwargs_for[method][selection])
+                    records = evaluate_condition(evaluator, questions, out_dir, name,
+                                                 INTERVENTION, alpha,
+                                                 layers=selections[method][selection])
                     sweeps[split][(method, selection, alpha)] = records
             log("{}: {} sweep complete".format(split, method))
 
@@ -305,16 +316,17 @@ def run(config_path, data_dir, out_dir, cache_dir, device=None, k=None, strength
                              "development_table": {str(a): table[a] for a in table}}
         log("{}: development-selected alpha = {} ({})".format(method, alpha, rule))
 
-    log("controls: general biology, alternative prompts, cross-check")
-    controls = {"biology": {}, "prompts": {}, "cross": {}}
+    log("controls: general biology and alternative prompts")
+    controls = {"biology": {}, "prompts": {}}
     biology = splits[("biology", "test")]
     controls["biology"]["baseline"] = evaluate_condition(evaluator, biology, out_dir, "biology__baseline")
     for method in active:
-        kind, alpha = METHODS[method]["intervention"], operating[method]["alpha"]
+        alpha = operating[method]["alpha"]
         for selection in selections[method]:
             name = "biology__" + condition_name(method, selection, alpha)
             controls["biology"][method + "/" + selection] = evaluate_condition(
-                evaluator, biology, out_dir, name, kind, alpha, **kwargs_for[method][selection])
+                evaluator, biology, out_dir, name, INTERVENTION, alpha,
+                layers=selections[method][selection])
 
     subset = [e for e in splits[("forget", "test")] + splits[("retain", "test")]
               if int(digest([config["seed"], "prompt_subset", e["id"]])[:8], 16) % 2 == 0]
@@ -323,23 +335,12 @@ def run(config_path, data_dir, out_dir, cache_dir, device=None, k=None, strength
         controls["prompts"][style] = {"baseline": evaluate_condition(
             other, subset, out_dir, "prompt_{}__baseline".format(style))}
         for method in active:
-            kind, alpha = METHODS[method]["intervention"], operating[method]["alpha"]
+            alpha = operating[method]["alpha"]
             name = "prompt_{}__{}".format(style, condition_name(method, "top_selective", alpha))
             controls["prompts"][style][method] = evaluate_condition(
-                other, subset, out_dir, name, kind, alpha, **kwargs_for[method]["top_selective"])
+                other, subset, out_dir, name, INTERVENTION, alpha,
+                layers=selections[method]["top_selective"])
         log("alternative prompt {} complete".format(style))
-
-    test_questions = splits[("forget", "test")] + splits[("retain", "test")]
-    for target in active:
-        for donor in active:
-            kind, alpha = METHODS[donor]["intervention"], operating[donor]["alpha"]
-            chosen = selections[target]["top_selective"]
-            name = "cross__target{}__{}__a{:g}".format(target, kind, alpha)
-            kwargs = intervention_kwargs(donor, chosen, directions)
-            controls["cross"]["units={}/intervention={}".format(target, kind)] = {
-                "alpha": alpha,
-                "records": evaluate_condition(evaluator, test_questions, out_dir, name,
-                                              kind, alpha, **kwargs)}
 
     summary = {"schema_version": 2, "elapsed_seconds": time.time() - started,
                "methods": active, "layer_count": layers,
