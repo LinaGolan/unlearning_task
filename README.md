@@ -1,13 +1,11 @@
 # Layer localization for selective unlearning
 
-By **LinaGolan**.
-
 Does mechanistic localization pick better intervention targets than random layer
 selection? This repository localizes the decoder layers that carry a model's
 WMDP-Bio behaviour, ablates them at inference time, and measures what that costs
 on WMDP-Bio versus a general-knowledge retain set.
 
-* **Model** `meta-llama/Llama-3.2-1B-Instruct` at revision `9213176726f574b556790deb65791e0c5aa438b6`, float32, 16 decoder layers, weights frozen throughout.
+* **Model** `meta-llama/Llama-3.2-1B-Instruct`, 16 decoder layers, weights frozen throughout.
 * **Forget set** `cais/wmdp`, config `wmdp-bio`.
 * **Retain set** `cais/mmlu`, eight high-school subjects (US history, world history, geography, government and politics, microeconomics, psychology, physics, computer science).
 * **Extra control** `cais/mmlu` `high_school_biology`, to separate "WMDP knowledge" from "biology knowledge".
@@ -21,6 +19,13 @@ any machine reproduces the same questions.
 Use Python 3.10+ with the dependencies in `requirements.txt`. Regenerating tables and figures from the included
 predictions needs no model download or Hugging Face token. Running inference
 requires access to the configured Llama model.
+
+First, clone the repository and enter its directory:
+
+```text
+git clone https://github.com/LinaGolan/unlearning_task.git
+cd unlearning_task
+```
 
 Create and activate an environment on Linux/macOS:
 
@@ -132,9 +137,9 @@ Two variants differ only in `M`:
 | `gate` | the correct letter's log probability, normalized over A–D |
 | `gate_margin` | the decision margin `z_correct − max_{i≠correct} z_i` |
 
-The margin is the quantity whose sign decides whether the prediction is right, which matters because
-accuracy changes only when the argmax flips. `gate` alone satisfies the assignment; `gate_margin` tests
-whether the first variant's failure is the objective rather than the idea.
+The margin measures how far the correct answer's score is above the strongest
+incorrect answer. Comparing `gate` and `gate_margin` tests whether changing the
+localization objective improves the forgetting–retention tradeoff.
 
 **Intervention.** A forward hook scales the selected block's residual contribution,
 `h' = h_in + (1 − α)·r_l`, so `α = 0` is the unmodified model and `α = 1` skips the block — a
@@ -144,10 +149,12 @@ suppression, not permanent knowledge erasure.
 
 ## Experimental discipline
 
-The localization split chooses layers, the development split chooses the
-strength `α`, and the test split is scored only once with both frozen. The
-assignment's four conditions (top-k localized, top-k selective, random, bottom-k)
-share the same `k` and the same `α` inside each method.
+The localization split chooses layers, and the development split chooses the
+reported strength `α`. The test split evaluates the full predefined strength
+grid to show how the effects change with intervention strength; test results
+are not used to select the reported operating point. At that operating point,
+the four conditions (top-k localized, top-k selective, random, bottom-k) share
+the same `k` and `α` within each method.
 
 ## Repository layout
 
@@ -161,11 +168,3 @@ src/unlearning/experiment.py the driver: checks, localization, sweep, controls
 src/unlearning/report.py     bootstrap intervals, tables, figures
 notebooks/experiment.ipynb   Colab runner
 ```
-
-The submission includes the two gradient methods, their main results and the
-`k = 2`/`k = 4` results. Development predictions, individual random controls and
-extra biology/prompt controls are retained so the analyses can be regenerated.
-Historical setup metadata is preserved, including the legacy
-`direction_alpha0_identity` check; no direction-ablation experiment is part of
-the current submission. Download caches, regenerated datasets, scratch files and
-the assignment handout are excluded from Git.
