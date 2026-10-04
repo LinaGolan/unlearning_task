@@ -9,10 +9,19 @@ on WMDP-Bio versus a general-knowledge retain set.
 * **Forget set** `cais/wmdp`, config `wmdp-bio`.
 * **Retain set** `cais/mmlu`, eight high-school subjects (US history, world history, geography, government and politics, microeconomics, psychology, physics, computer science).
 * **Extra control** `cais/mmlu` `high_school_biology`, to separate "WMDP knowledge" from "biology knowledge".
-* **Report** [`Research_report.html`](Research_report.html), a self-contained HTML file with embedded figures.
+* **Report** [`Research_report_fullscreen.html`](Research_report_fullscreen.html), a self-contained HTML file with embedded figures.
 
 Every model and dataset revision is pinned; splits come from SHA-256 rankings, so
-any machine reproduces the same questions.
+the saved predictions reproduce the same selection and splits.
+
+Questions must be answered correctly in their original order and in at least
+18 of all 24 answer orderings. The remaining 23 orderings are scored only for
+originally correct questions. Of 1,273 WMDP and 1,848 retain questions, 567 and
+754 qualify; deterministic selection keeps 512 per set plus 64 biology controls.
+Each main set has 128 localization, 128 development and 256 test questions.
+The experiment uses original questions, not duplicated permutations. Baseline
+accuracy is 100% on the selected test sets by construction; this is not an
+improvement in the model on unfiltered data.
 
 ## Environment
 
@@ -60,8 +69,8 @@ per-question predictions. No model inference is performed:
 
 ```text
 python -m unlearning report
-python -m unlearning report --methods gate --out results/k2 --figures results/k2/figures
-python -m unlearning report --methods gate --out results/k4 --figures results/k4/figures
+python -m unlearning report --methods gate --out results_fullscreen_experiment/k2 --figures results_fullscreen_experiment/k2/figures
+python -m unlearning report --methods gate --out results_fullscreen_experiment/k4 --figures results_fullscreen_experiment/k4/figures
 ```
 
 They produce CSV tables, detailed Markdown tables, analysis JSON and plots.
@@ -77,7 +86,6 @@ Set `HF_TOKEN` to a Hugging Face token with access to Llama-3.2-1B-Instruct:
 Use fresh output directories so the submitted predictions are preserved:
 
 ```text
-python -m unlearning prepare
 python -m unlearning run --out results_fresh/main
 python -m unlearning report --out results_fresh/main --figures results_fresh/main/figures
 python -m unlearning run --methods gate --k 2 --strengths 0,0.5,1.0 --out results_fresh/k2
@@ -95,33 +103,46 @@ its activations. Execution time and fresh predictions can vary by environment.
 
 ## Colab option
 
-[Open the notebook in Colab](https://colab.research.google.com/github/LinaGolan/unlearning_task/blob/main/notebooks/experiment.ipynb).
-It can clone this repository or accept a ZIP upload, run the same commands,
-display the results and download an output archive. For saved-results analysis,
-follow its setup instructions and skip to section 7. To run fresh inference,
-follow section 6 and use a fresh output directory.
+[Open the notebook in Colab](https://colab.research.google.com/github/LinaGolan/unlearning_task/blob/main/notebooks/full_screening.ipynb).
+It clones this repository, regenerates the saved analysis, and optionally runs
+fresh inference with an enabled `HF_TOKEN` secret and a GPU. Fresh predictions
+are saved to Google Drive so completed conditions survive runtime disconnects.
 
-## What each step produces
+## Reproduce screening
+
+The submitted screening predictions, question statistics and selected splits are
+in `results_fullscreen/`. `data_fullscreen/` preserves the full source pool and
+compatible baseline predictions reused during this run; their provenance and
+checksums are retained. No earlier experiment files are needed.
+
+To screen all source questions afresh without reusing predictions:
+
+```text
+python -m unlearning.full_screening prepare --source results_fresh/source
+python -m unlearning.full_screening run --source results_fresh/source --out results_fresh/screening --device cuda
+python -m unlearning run --config results_fresh/screening/selected_config.json --data results_fresh/screening/selected_data --out results_fresh/rescreened_main
+```
+
+Fresh inference can change which questions pass. Use the committed selected data
+(the CLI default) to repeat interventions on the submitted subset.
+
+## Saved evidence
 
 | Path | Contents |
 | --- | --- |
-| `data/` | `forget/`, `retain/`, `biology/` splits as JSONL plus `manifest.json` with per-file checksums |
-| `results/setup.json` | environment, the exact scored prompt for each format, and the mechanism checks |
-| `results/localization.json` | per-layer scores for each objective, with split-half stability |
-| `results/predictions/*.jsonl` | per-question predictions, one file per (split, method, selection, strength) |
-| `results/run.json` | selected layers, the development-chosen strength, timings |
-| `results/analysis.json` | accuracies, paired bootstrap intervals, controls |
-| `results/table_*.csv` | the assignment's required comparison table, one per method |
-| `results/report_tables.md` | generated numerical tables, including the Appendix A gradient diagnostic |
-| `report/figures/*.png` | localization, strength-curve and tradeoff figures |
-| `results/k2/`, `results/k4/` | the same artefacts for the `k = 2` and `k = 4` layer-budget arms |
+| `results_fullscreen/selected_data/` | disjoint original questions and checksummed manifest |
+| `results_fullscreen/selected_config.json` | pinned configuration for the selected splits |
+| `results_fullscreen/question_statistics.jsonl` | original correctness and permutation counts for every source question |
+| `results_fullscreen_experiment/main/` | both methods, localization, development sweeps, test results and controls |
+| `results_fullscreen_experiment/k2/`, `k4/` | gate experiments with two and four selected layers |
 
-`run` is resumable: a condition whose `results/predictions/*.jsonl` file already
-exists is not re-scored, so an interrupted run continues where it stopped. Cached
-localization scores are reused, and any method missing from the cache (after a
-`--methods` change) is computed and merged. Because prediction filenames do not
-record the layer budget, a run refuses to reuse an output directory built with a
-different `k`, model, dataset, prompt or seed — use a fresh `--out` for those.
+Each experiment directory includes `setup.json` (environment and mechanism
+checks), `localization.json`, per-question `predictions/`, `run.json`,
+`analysis.json`, CSV tables, `report_tables.md` and `figures/`.
+
+Runs resume completed conditions and cached localization. Use a fresh output
+directory when changing the model, data, prompt, seed or layer budget. Screening
+saves each completed batch. An interrupted experiment condition is rerun.
 
 ## Method summary
 
@@ -159,12 +180,13 @@ the same `k` and `α` within each method.
 ## Repository layout
 
 ```
-configs/experiment.json      every pinned revision, split size, strength and seed
+configs/experiment.json      pinned source configuration for screening
 src/unlearning/data.py       download, deduplicate, split, checksum
 src/unlearning/evaluate.py   prompt formats and next-token A-D scoring
 src/unlearning/intervene.py  the intervention and the gate gradients
 src/unlearning/localize.py   the gradient localization scores and stability checks
 src/unlearning/experiment.py the driver: checks, localization, sweep, controls
 src/unlearning/report.py     bootstrap intervals, tables, figures
-notebooks/experiment.ipynb   Colab runner
+src/unlearning/full_screening.py  correct-first screening and subset selection
+notebooks/full_screening.ipynb     Colab runner
 ```

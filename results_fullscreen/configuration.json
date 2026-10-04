@@ -1,0 +1,11 @@
+{
+  "cache_sha256": "dd2d14dc41535347377d50cbc92048a857072e5a085abced882f47baef459ac2",
+  "model": {
+    "dtype": "float32",
+    "id": "meta-llama/Llama-3.2-1B-Instruct",
+    "revision": "9213176726f574b556790deb65791e0c5aa438b6"
+  },
+  "prompt": "harness",
+  "source_sha256": "79eb75a5a79ef08bd8677c5238961780899aab24fefa8b390e99f2c9f36b5588",
+  "threshold": 18
+}

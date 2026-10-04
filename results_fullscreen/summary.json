@@ -1,0 +1,30 @@
+{
+  "eligible": {
+    "biology": 115,
+    "forget": 567,
+    "retain": 754
+  },
+  "new_predictions": 33346,
+  "original_correct": {
+    "biology": 168,
+    "forget": 751,
+    "retain": 1042
+  },
+  "original_predictions": 3430,
+  "permutation_predictions": 45103,
+  "selected": {
+    "biology": 64,
+    "forget": 512,
+    "retain": 512
+  },
+  "source_questions": {
+    "biology": 309,
+    "forget": 1273,
+    "retain": 1848
+  },
+  "splits": {
+    "development": 128,
+    "localization": 128,
+    "test": 256
+  }
+}

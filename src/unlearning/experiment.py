@@ -132,12 +132,15 @@ def condition_name(method, selection, alpha):
     return "{}__{}__a{:g}".format(method, selection, alpha)
 
 
-def evaluate_condition(evaluator, examples, out_dir, name, kind=None, alpha=0.0, **kwargs):
+def evaluate_condition(evaluator, examples, out_dir, name, kind=None, alpha=0.0,
+                       reuse_records=None, **kwargs):
     """Score `examples`, caching per-question records under results/predictions/."""
     path = Path(out_dir) / "predictions" / (name + ".jsonl")
     if path.exists():
         return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
-    if kind is None or alpha == 0.0:
+    if reuse_records is not None:
+        records = reuse_records
+    elif kind is None or alpha == 0.0:
         records = evaluator.score(examples)
     else:
         with Intervention(evaluator.model, kind, alpha=alpha, **kwargs):
@@ -194,7 +197,7 @@ def choose_strength(table, strengths, budget_pp):
 
 
 def run(config_path, data_dir, out_dir, cache_dir, device=None, k=None, strengths=None,
-        methods=None):
+        methods=None, prepared_data=True):
     """`k`, `strengths` and `methods` override the config, so sweeping a dimension
     needs no new config file."""
     config = read_config(config_path)
@@ -208,7 +211,9 @@ def run(config_path, data_dir, out_dir, cache_dir, device=None, k=None, strength
     config["intervention"]["methods"] = active
     out_dir, started = Path(out_dir), time.time()
     log("preparing data")
-    manifest = datamod.prepare(config, data_dir, cache_dir)
+    manifest = datamod.verify(data_dir) if prepared_data else datamod.prepare(config, data_dir, cache_dir)
+    if prepared_data and manifest["splits"] != config["splits"]:
+        raise ValueError("Prepared data split sizes differ from the experiment config.")
     write_json(out_dir / "data_manifest.json", manifest)
 
     log("loading model")
@@ -285,6 +290,7 @@ def run(config_path, data_dir, out_dir, cache_dir, device=None, k=None, strength
 
     strengths = config["intervention"]["strengths"]
     sweeps, baselines = {}, {}
+    equivalent = {}
     for split in ("development", "test"):
         questions = splits[("forget", split)] + splits[("retain", split)]
         log("baseline on {} ({} questions)".format(split, len(questions)))
@@ -300,9 +306,12 @@ def run(config_path, data_dir, out_dir, cache_dir, device=None, k=None, strength
                         sweeps[split][(method, selection, alpha)] = baselines[split]
                         continue
                     name = split + "__" + condition_name(method, selection, alpha)
+                    key = (split, tuple(selections[method][selection]), alpha)
                     records = evaluate_condition(evaluator, questions, out_dir, name,
                                                  INTERVENTION, alpha,
+                                                 reuse_records=equivalent.get(key),
                                                  layers=selections[method][selection])
+                    equivalent[key] = records
                     sweeps[split][(method, selection, alpha)] = records
             log("{}: {} sweep complete".format(split, method))
 
@@ -320,13 +329,17 @@ def run(config_path, data_dir, out_dir, cache_dir, device=None, k=None, strength
     controls = {"biology": {}, "prompts": {}}
     biology = splits[("biology", "test")]
     controls["biology"]["baseline"] = evaluate_condition(evaluator, biology, out_dir, "biology__baseline")
+    equivalent_biology = {}
     for method in active:
         alpha = operating[method]["alpha"]
         for selection in selections[method]:
             name = "biology__" + condition_name(method, selection, alpha)
+            key = (tuple(selections[method][selection]), alpha)
             controls["biology"][method + "/" + selection] = evaluate_condition(
                 evaluator, biology, out_dir, name, INTERVENTION, alpha,
+                reuse_records=equivalent_biology.get(key),
                 layers=selections[method][selection])
+            equivalent_biology[key] = controls["biology"][method + "/" + selection]
 
     subset = [e for e in splits[("forget", "test")] + splits[("retain", "test")]
               if int(digest([config["seed"], "prompt_subset", e["id"]])[:8], 16) % 2 == 0]
@@ -334,12 +347,16 @@ def run(config_path, data_dir, out_dir, cache_dir, device=None, k=None, strength
         other = Evaluator(model, tokenizer, config, style)
         controls["prompts"][style] = {"baseline": evaluate_condition(
             other, subset, out_dir, "prompt_{}__baseline".format(style))}
+        equivalent_prompt = {}
         for method in active:
             alpha = operating[method]["alpha"]
             name = "prompt_{}__{}".format(style, condition_name(method, "top_selective", alpha))
+            key = (tuple(selections[method]["top_selective"]), alpha)
             controls["prompts"][style][method] = evaluate_condition(
                 other, subset, out_dir, name, INTERVENTION, alpha,
+                reuse_records=equivalent_prompt.get(key),
                 layers=selections[method]["top_selective"])
+            equivalent_prompt[key] = controls["prompts"][style][method]
         log("alternative prompt {} complete".format(style))
 
     summary = {"schema_version": 2, "elapsed_seconds": time.time() - started,
